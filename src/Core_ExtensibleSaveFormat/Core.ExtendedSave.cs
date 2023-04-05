@@ -8,7 +8,8 @@ using System.Collections.Generic;
 using AIChara;
 #endif
 #if RG
-using UnhollowerRuntimeLib;
+using Il2CppSystem.Threading;
+using UnhollowerBaseLib;
 using Chara;
 #endif
 
@@ -26,6 +27,9 @@ namespace ExtensibleSaveFormat
         /// <summary> Plugin version </summary>
         public const string Version = Metadata.PluginsVersion;
         internal static new ManualLogSource Logger;
+#if RG
+        private static IFormatterResolver resolver;
+#endif
         /// <summary> Marker that indicates the extended save region on cards </summary>
         public static string Marker = "KKEx";
         /// <summary> Version of the extended save data on cards </summary>
@@ -137,36 +141,21 @@ namespace ExtensibleSaveFormat
 
             chaDictionary[id] = extendedFormatData;
         }
-#if RG
-        internal static void MessagePackSerialize<T>(MessagePackWriter writer, T obj)
-        {
-            try
-            {
-                MessagePackSerializer.Serialize(Il2CppType.Of<T>(), ref writer, (Il2CppSystem.Object)(obj as Object), MessagePackSerializerOptions.Standard);
-                return;
-            }
-            catch (System.InvalidOperationException)
-            {
-                Logger.LogWarning("Only primitive types are supported. Serialize your data first.");
-                throw;
-            }
-        }
 
-        internal static T MessagePackDeserialize<T>(Il2CppSystem.Buffers.ReadOnlySequence<byte> obj)
-        {
-            try
-            {
-                return MessagePackSerializer.Deserialize<T>(ref obj, MessagePackSerializerOptions.Standard);
-            }
-            catch (System.InvalidOperationException)
-            {
-                Logger.LogWarning("Only primitive types are supported. Serialize your data first.");
-                throw;
-            }
-        }
-#else
         internal static byte[] MessagePackSerialize<T>(T obj)
         {
+#if RG
+            if (resolver == null)
+            {
+                InitializeResolver();
+            }
+            try
+            {
+                MessagePackSerializerOptions options = MessagePackSerializerOptions.Standard.WithResolver(resolver);
+                return MessagePackSerializer.Serialize(obj, options, CancellationToken.None);
+            }
+#else
+
             try
             {
                 return MessagePackSerializer.Serialize(obj, StandardResolver.Instance);
@@ -175,6 +164,7 @@ namespace ExtensibleSaveFormat
             {
                 return MessagePackSerializer.Serialize(obj, ContractlessStandardResolver.Instance);
             }
+#endif
             catch (InvalidOperationException)
             {
                 Logger.LogWarning("Only primitive types are supported. Serialize your data first.");
@@ -184,6 +174,19 @@ namespace ExtensibleSaveFormat
 
         internal static T MessagePackDeserialize<T>(byte[] obj)
         {
+#if RG
+            if (resolver == null)
+            {
+                InitializeResolver();
+            }
+
+            MessagePackSerializerOptions options = MessagePackSerializerOptions.Standard.WithResolver(resolver);
+            try
+            {
+                Il2CppStructArray<byte> bytes = new Il2CppStructArray<byte>(obj);
+                return MessagePackSerializer.Deserialize<T>(bytes, options, CancellationToken.None);
+            }
+#else
             try
             {
                 return MessagePackSerializer.Deserialize<T>(obj, StandardResolver.Instance);
@@ -192,11 +195,20 @@ namespace ExtensibleSaveFormat
             {
                 return MessagePackSerializer.Deserialize<T>(obj, ContractlessStandardResolver.Instance);
             }
+#endif
             catch (InvalidOperationException)
             {
                 Logger.LogWarning("Only primitive types are supported. Serialize your data first.");
                 throw;
             }
+        }
+#if RG
+        internal static void InitializeResolver()
+        {
+            resolver = CompositeResolver.Create(new[] {
+                DynamicGenericResolver.Instance.Cast<IFormatterResolver>(),
+                StandardResolver.Instance.Cast<IFormatterResolver>()
+            });
         }
 #endif
     }

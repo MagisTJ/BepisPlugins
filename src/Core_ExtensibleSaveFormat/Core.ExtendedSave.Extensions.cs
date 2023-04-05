@@ -25,12 +25,7 @@ namespace ExtensibleSaveFormat
                 var bytes = (byte[])prop.GetValue();
                 if (bytes != null)
                 {
-#if RG
-                    Il2CppSystem.Buffers.ReadOnlySequence<byte> buffer = new Il2CppSystem.Buffers.ReadOnlySequence<byte>((IntPtr)bytes[0]);
-                    return MessagePackDeserialize<Dictionary<string, PluginData>>(buffer);
-#else
                     return MessagePackDeserialize<Dictionary<string, PluginData>>(bytes);
-#endif
                 }
             }
             catch (System.Exception ex)
@@ -53,11 +48,7 @@ namespace ExtensibleSaveFormat
         private static void SetExtendedData(object messagePackObject, string id, PluginData data)
         {
             var pluginData = GetExtendedData(messagePackObject);
-#if RG
             if (pluginData == null) pluginData = new Dictionary<string, PluginData>();
-#else
-            if (pluginData == null) pluginData = new Dictionary<string, PluginData>();
-#endif
 
             if (data == null)
                 pluginData.Remove(id);
@@ -66,15 +57,8 @@ namespace ExtensibleSaveFormat
 
             try
             {
-#if RG
-                MessagePackWriter writer = new MessagePackWriter();
-                MessagePackSerialize(writer, pluginData);
-                Traverse.Create(messagePackObject).Property(ExtendedSaveDataPropertyName).SetValue(writer);
-#else
                 var bytes = MessagePackSerialize(pluginData);
-
                 Traverse.Create(messagePackObject).Property(ExtendedSaveDataPropertyName).SetValue(bytes);
-#endif
             }
             catch (System.Exception ex)
             {

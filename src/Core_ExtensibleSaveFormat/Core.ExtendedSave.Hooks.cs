@@ -9,6 +9,8 @@ using System.Reflection.Emit;
 using AIChara;
 #elif RG
 using Chara;
+using Illusion.IO;
+using Il2CppSystem.Threading;
 #endif
 
 namespace ExtensibleSaveFormat
@@ -70,9 +72,13 @@ namespace ExtensibleSaveFormat
                 {
                     long originalPosition = reader.BaseStream.Position;
 #if RG
-                    long basePosition = originalPosition;
-                    foreach (var lstInfo in header.lstInfo)
-                        basePosition -= lstInfo.size;
+                    long infoSize = 0;
+                    foreach (BlockHeader.Info x in header.lstInfo)
+                    {
+                        infoSize += x.size;
+                    }
+
+                    long basePosition = originalPosition - infoSize;
 #else
                     long basePosition = originalPosition - header.lstInfo.Sum(x => x.size);
 #endif
@@ -154,10 +160,19 @@ namespace ExtensibleSaveFormat
                 if (!__result || __instance.PngData == null || __instance.FacePngData == null)
                     return;
 #if RG
-                br.BaseStream.Position = __instance.PngData.Length + 107 + __instance.FacePngData.Length;
-                var blockHeaderSize = br.ReadInt32();
-                var blockHeaderBytes = br.ReadBytes(blockHeaderSize);
-                BlockHeader blockHeader = MessagePackSerializer.Deserialize<BlockHeader>(blockHeaderBytes, null, Il2CppSystem.Threading.CancellationToken.None);
+
+                long originalPos = br.BaseStream.Position;
+                br.BaseStream.Seek(0, Il2CppSystem.IO.SeekOrigin.Begin);
+
+                long pngSize = PngFile.GetPngSize(br);
+                br.BaseStream.Seek(pngSize + 103, Il2CppSystem.IO.SeekOrigin.Current);
+
+                long facePngSize = br.ReadInt32();
+                br.BaseStream.Seek(facePngSize, Il2CppSystem.IO.SeekOrigin.Current);
+
+                int count = br.ReadInt32();
+                BlockHeader blockHeader = MessagePackSerializer.Deserialize<BlockHeader>(br.ReadBytes(count), null, CancellationToken.None);
+
                 ChaFileLoadFileHook(__instance, blockHeader, br);
 #endif
 
@@ -217,11 +232,21 @@ namespace ExtensibleSaveFormat
 
             private static byte[] currentlySavingData = null;
 
+#if RG
+            [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(Il2CppSystem.IO.BinaryWriter), typeof(bool), typeof(int))]
+            private static bool ChaFileSaveFilePreHook(ChaFile __instance, Il2CppSystem.IO.BinaryWriter bw, bool savePng, int lang, ref bool __result)
+            {
+                __result = ChaFileSaveFile(__instance, bw, savePng, lang);
+
+                return false;
+            }
+#else
 #if KK || KKS
             [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool))]
-#elif !RG
+#else
             [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool), typeof(int))]
             private static void ChaFileSaveFilePreHook(ChaFile __instance, BinaryWriter bw, bool savePng, int lang) => CardWriteEvent(__instance);
+#endif
 #endif
 
 #if RG
@@ -270,99 +295,132 @@ namespace ExtensibleSaveFormat
 #if KK || KKS
             [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool))]
             private static void ChaFileSaveFilePostHook(bool __result, BinaryWriter bw)
-#elif RG
-            [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(Il2CppSystem.IO.BinaryWriter), typeof(bool), typeof(int))]
-            private static void ChaFileSaveFilePostHook(ChaFile __instance, bool __result, Il2CppSystem.IO.BinaryWriter bw)
-#else
+#elif !RG
             [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool), typeof(int))]
             private static void ChaFileSaveFilePostHook(bool __result, BinaryWriter bw)
-#endif
             {
-#if RG
-                if (!__result)
+                if (!__result || currentlySavingData == null)
                     return;
 
-                // set the binary writer to the begging of the block header, we are going to re-write all of
-                // the block data since we cant insert the header into the middle of the stream through a transpiler
-                bw.OutStream.Position = __instance.PngData.Length + 107 + __instance.FacePngData.Length;
+                bw.Write(currentlySavingData);
 
-                byte[] customBytes = __instance.GetCustomBytes();
-                byte[] coordinateBytes = __instance.GetCoordinateBytes();
-                byte[] parameterBytes = __instance.GetParameterBytes();
-                byte[] gameInfoBytes = __instance.GetGameInfoBytes();
-                byte[] statusBytes = __instance.GetStatusBytes();
-                const int blockCount = 5;
-                string[] blockNames = new string[]
+                return;
+            }
+#endif
+
+#if RG
+            // set the binary writer to the begging of the block header, we are going to re-write all of
+            // the block data since we cant insert the header into the middle of the stream through a transpiler
+            private static bool ChaFileSaveFile(ChaFile chaFile, Il2CppSystem.IO.BinaryWriter bw, bool savePng, int lang)
+            {
+                CardWriteEvent(chaFile);
+
+                if (savePng && chaFile.PngData != null)
                 {
-                    ChaFileCustom.BlockName,
-                    ChaFileCoordinate.BlockName,
-                    ChaFileParameter.BlockName,
-                    ChaFileGameInfo.BlockName,
-                    ChaFileStatus.BlockName,
-                };
-                string[] blockVersions = new string[]
+                    bw.Write(chaFile.PngData);
+                }
+
+                bw.Write(100);
+                bw.Write("【RG_Chara】");
+                bw.Write(ChaFileDefine.ChaFileVersion.ToString());
+                bw.Write(lang);
+                bw.Write(chaFile.UserID);
+                bw.Write(chaFile.DataID);
+
+                if (savePng && chaFile.FacePngData != null)
                 {
-                    ChaFileDefine.ChaFileCustomVersion.ToString(),
-                    ChaFileDefine.ChaFileCoordinateVersion.ToString(),
-                    ChaFileDefine.ChaFileParameterVersion.ToString(),
-                    ChaFileDefine.ChaFileGameInfoVersion.ToString(),
-                    ChaFileDefine.ChaFileStatusVersion.ToString(),
-                };
-                long[] blockSizes = new long[blockCount];
-                blockSizes[0] = (long)((customBytes == null) ? 0 : customBytes.Length);
-                blockSizes[1] = (long)((coordinateBytes == null) ? 0 : coordinateBytes.Length);
-                blockSizes[2] = (long)((parameterBytes == null) ? 0 : parameterBytes.Length);
-                blockSizes[3] = (long)((gameInfoBytes == null) ? 0 : gameInfoBytes.Length);
-                blockSizes[4] = (long)((statusBytes == null) ? 0 : statusBytes.Length);
-                long[] blockPositions = new long[]
+                    bw.Write(chaFile.FacePngData.Length);
+                    bw.Write(chaFile.FacePngData);
+                }
+                else
                 {
-                    0,
-                    blockSizes[0],
-                    blockSizes[0] + blockSizes[1],
-                    blockSizes[0] + blockSizes[1] + blockSizes[2],
-                    blockSizes[0] + blockSizes[1] + blockSizes[2] + blockSizes[3]
+                    bw.Write(0);
+                }
+
+                byte[] customBytes = chaFile.GetCustomBytes();
+                byte[] coordinateBytes = chaFile.GetCoordinateBytes();
+                byte[] parameterBytes = chaFile.GetParameterBytes();
+                byte[] gameInfoBytes = chaFile.GetGameInfoBytes();
+                byte[] statusBytes = chaFile.GetStatusBytes();
+
+                int num = 5;
+                long num2 = 0L;
+
+                string[] array = new string[]
+                {
+                ChaFileCustom.BlockName,
+                ChaFileCoordinate.BlockName,
+                ChaFileParameter.BlockName,
+                ChaFileGameInfo.BlockName,
+                ChaFileStatus.BlockName,
+                ExtendedSave.Marker
                 };
+
+                string[] array2 = new string[]
+                {
+                ChaFileDefine.ChaFileCustomVersion.ToString(),
+                ChaFileDefine.ChaFileCoordinateVersion.ToString(),
+                ChaFileDefine.ChaFileParameterVersion.ToString(),
+                ChaFileDefine.ChaFileGameInfoVersion.ToString(),
+                ChaFileDefine.ChaFileStatusVersion.ToString(),
+                ExtendedSave.DataVersion.ToString()
+                };
+
+                long[] array3 = new long[]
+                {
+                    (customBytes == null) ? 0 : customBytes.Length,
+                    (coordinateBytes == null) ? 0 : coordinateBytes.Length,
+                    (parameterBytes == null) ? 0 : parameterBytes.Length,
+                    (gameInfoBytes == null) ? 0 : gameInfoBytes.Length,
+                    (statusBytes == null) ? 0 : statusBytes.Length
+                };
+
+                long[] array4 = new long[]
+                {
+                num2,
+                num2 + array3[0],
+                num2 + array3[0] + array3[1],
+                num2 + array3[0] + array3[1] + array3[2],
+                num2 + array3[0] + array3[1] + array3[2] + array3[3]
+                };
+
                 BlockHeader blockHeader = new BlockHeader();
-
-                for (int block = 0; block < blockCount; block++)
+                for (int i = 0; i < num; i++)
                 {
                     BlockHeader.Info item = new BlockHeader.Info
                     {
-                        name = blockNames[block],
-                        version = blockVersions[block],
-                        size = blockSizes[block],
-                        pos = blockPositions[block]
+                        name = array[i],
+                        version = array2[i],
+                        size = array3[i],
+                        pos = array4[i]
                     };
-
                     blockHeader.lstInfo.Add(item);
                 }
 
-                ChaFileSaveFileHook(__instance, ref blockHeader, ref blockSizes);
+                ChaFileSaveFileHook(chaFile, ref blockHeader, ref array3);
 
                 var blockData = MessagePackSerializer.Serialize<BlockHeader>(blockHeader, null, Il2CppSystem.Threading.CancellationToken.None);
 
                 bw.Write(blockData.Length);
                 bw.Write(blockData);
                 long totalBlockSize = 0L;
-                foreach (long blockSize in blockSizes)
+                foreach (long blockSize in array3)
                 {
                     totalBlockSize += blockSize;
                 }
-                bw.Write(totalBlockSize);
+
+
                 bw.Write(customBytes);
                 bw.Write(coordinateBytes);
                 bw.Write(parameterBytes);
                 bw.Write(gameInfoBytes);
                 bw.Write(statusBytes);
-
-#endif
-                if (!__result || currentlySavingData == null)
-                    return;
-
                 bw.Write(currentlySavingData);
+
+                return true;
             }
 
-#if !RG
+#else
 #if KK || KKS
             [HarmonyTranspiler, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool))]
 #else
@@ -404,13 +462,13 @@ namespace ExtensibleSaveFormat
                 return newInstructionSet;
             }
 #endif
-            #endregion
+#endregion
 
-            #endregion
+#endregion
 
-            #region ChaFileCoordinate
+#region ChaFileCoordinate
 
-            #region Loading
+#region Loading
 
 #if !RG
 #if KK || KKS
@@ -540,9 +598,9 @@ namespace ExtensibleSaveFormat
                 CoordinateReadEvent(coordinate);
             }
 
-            #endregion
+#endregion
 
-            #region Saving
+#region Saving
 
 #if !RG
 #if KK || KKS
@@ -633,11 +691,11 @@ namespace ExtensibleSaveFormat
                 bw.Write(data);
             }
 
-            #endregion
+#endregion
 
-            #endregion
+#endregion
 
-            #region Helper
+#region Helper
 
             private static bool CheckCallVirtName(CodeInstruction instruction, string name) => instruction.opcode == OpCodes.Callvirt &&
                        //need to do reflection fuckery here because we can't access MonoMethod which is the operand type, not MehtodInfo like normal reflection
@@ -647,9 +705,9 @@ namespace ExtensibleSaveFormat
                        //need to do reflection fuckery here because we can't access MonoCMethod which is the operand type, not ConstructorInfo like normal reflection
                        instruction.operand.GetType().GetProperty("DeclaringType", AccessTools.all).GetGetMethod().Invoke(instruction.operand, null).ToString() == name;
 
-            #endregion
+#endregion
 
-            #region Extended Data Override Hooks
+#region Extended Data Override Hooks
 #if EC || KK || KKS
             //Prevent loading extended data when loading the list of characters in Chara Maker since it is irrelevant here
             [HarmonyPrefix, HarmonyPatch(typeof(ChaCustom.CustomCharaFile), nameof(ChaCustom.CustomCharaFile.Initialize))]
@@ -677,7 +735,7 @@ namespace ExtensibleSaveFormat
             [HarmonyPostfix, HarmonyPatch(typeof(CharaCustom.CvsO_CharaSave), nameof(CharaCustom.CvsO_CharaSave.UpdateCharasList))]
             private static void CvsO_CharaSaveUpdateCharasListPostfix() => LoadEventsEnabled = true;
 #endif
-            #endregion
+#endregion
 
 #if KK
             private static IEnumerable<CodeInstruction> PartyLiveCharaFixTpl(IEnumerable<CodeInstruction> instructions)
