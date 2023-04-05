@@ -6,6 +6,20 @@ namespace ExtensibleSaveFormat
     /// <summary>
     /// An object containing data saved to and loaded from cards.
     /// </summary>
+
+#if RG
+    public class PluginData : MessagePackObjectAttribute
+    {
+        /// <summary>
+        /// Version of the plugin data saved to the card. Get or set this if ever your plugin data format changes and use it to differentiate.
+        /// </summary>
+        public int version;
+        /// <summary>
+        /// Dictionary of objects saved to or loaded loaded from the card.
+        /// </summary>
+        public Dictionary<string, object> data = new Dictionary<string, object>();
+    }
+#else
     [MessagePackObject]
     public class PluginData
     {
@@ -20,4 +34,5 @@ namespace ExtensibleSaveFormat
         [Key(1)]
         public Dictionary<string, object> data = new Dictionary<string, object>();
     }
+#endif
 }

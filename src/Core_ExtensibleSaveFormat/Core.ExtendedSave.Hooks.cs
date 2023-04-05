@@ -7,6 +7,8 @@ using System.Linq;
 using System.Reflection.Emit;
 #if AI || HS2
 using AIChara;
+#elif RG
+using Chara;
 #endif
 
 namespace ExtensibleSaveFormat
@@ -48,21 +50,32 @@ namespace ExtensibleSaveFormat
             #region Loading
 #if KK || KKS
             [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.LoadFile), typeof(BinaryReader), typeof(bool), typeof(bool))]
+#elif RG
+            [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.LoadFile), typeof(Il2CppSystem.IO.BinaryReader), typeof(int), typeof(bool), typeof(bool))]
 #else
             [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.LoadFile), typeof(BinaryReader), typeof(int), typeof(bool), typeof(bool))]
 #endif
 
             private static void ChaFileLoadFilePreHook() => cardReadEventCalled = false;
 
+#if RG
+            private static void ChaFileLoadFileHook(ChaFile file, BlockHeader header, Il2CppSystem.IO.BinaryReader reader)
+#else
             private static void ChaFileLoadFileHook(ChaFile file, BlockHeader header, BinaryReader reader)
+#endif
             {
                 var info = header.SearchInfo(Marker);
 
                 if (LoadEventsEnabled && info != null && info.version == DataVersion.ToString())
                 {
                     long originalPosition = reader.BaseStream.Position;
+#if RG
+                    long basePosition = originalPosition;
+                    foreach (var lstInfo in header.lstInfo)
+                        basePosition -= lstInfo.size;
+#else
                     long basePosition = originalPosition - header.lstInfo.Sum(x => x.size);
-
+#endif
                     reader.BaseStream.Position = basePosition + info.pos;
 
                     byte[] data = reader.ReadBytes((int)info.size);
@@ -73,13 +86,19 @@ namespace ExtensibleSaveFormat
 
                     try
                     {
+#if RG
+                        Il2CppSystem.Buffers.ReadOnlySequence<byte> buffer = new Il2CppSystem.Buffers.ReadOnlySequence<byte>((IntPtr)data[0]);
+                        var dictionary = MessagePackSerializer.Deserialize<Dictionary<string, PluginData>>(ref buffer);
+#else
                         var dictionary = MessagePackSerializer.Deserialize<Dictionary<string, PluginData>>(data);
+#endif
                         internalCharaDictionary.Set(file, dictionary);
                     }
                     catch (Exception e)
                     {
                         internalCharaDictionary.Set(file, new Dictionary<string, PluginData>());
-                        Logger.LogWarning($"Invalid or corrupted extended data in card \"{file.charaFileName}\" - {e.Message}");
+                        string warning = $"Invalid or corrupted extended data in card \"{file.CharaFileName}\" - {e.Message}";
+                        Logger.LogWarning(warning);
                     }
 
                     CardReadEvent(file);
@@ -90,6 +109,7 @@ namespace ExtensibleSaveFormat
                 }
             }
 
+#if !RG
 #if KK || KKS
             [HarmonyTranspiler, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.LoadFile), typeof(BinaryReader), typeof(bool), typeof(bool))]
 #else
@@ -118,15 +138,28 @@ namespace ExtensibleSaveFormat
 
                 return newInstructionSet;
             }
+#endif
 
 #if KK || KKS
             [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.LoadFile), typeof(BinaryReader), typeof(bool), typeof(bool))]
+            private static void ChaFileLoadFilePostHook(ChaFile __instance, bool __result, BinaryReader br)
+#elif RG
+            [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.LoadFile), typeof(Il2CppSystem.IO.BinaryReader), typeof(int), typeof(bool), typeof(bool))]
+            private static void ChaFileLoadFilePostHook(ChaFile __instance, bool __result, Il2CppSystem.IO.BinaryReader br, int lang, bool noLoadPNG, bool noLoadStatus)
 #else
             [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.LoadFile), typeof(BinaryReader), typeof(int), typeof(bool), typeof(bool))]
-#endif
             private static void ChaFileLoadFilePostHook(ChaFile __instance, bool __result, BinaryReader br)
+#endif
             {
-                if (!__result) return;
+                if (!__result || __instance.PngData == null || __instance.FacePngData == null)
+                    return;
+#if RG
+                br.BaseStream.Position = __instance.PngData.Length + 107 + __instance.FacePngData.Length;
+                var blockHeaderSize = br.ReadInt32();
+                var blockHeaderBytes = br.ReadBytes(blockHeaderSize);
+                BlockHeader blockHeader = MessagePackSerializer.Deserialize<BlockHeader>(blockHeaderBytes, null, Il2CppSystem.Threading.CancellationToken.None);
+                ChaFileLoadFileHook(__instance, blockHeader, br);
+#endif
 
 #if KK // Doesn't work in KKS because KK cards go through a different load path
                 //Compatibility for ver 1 and 2 ext save data
@@ -186,12 +219,16 @@ namespace ExtensibleSaveFormat
 
 #if KK || KKS
             [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool))]
-#else
+#elif !RG
             [HarmonyPrefix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool), typeof(int))]
+            private static void ChaFileSaveFilePreHook(ChaFile __instance, BinaryWriter bw, bool savePng, int lang) => CardWriteEvent(__instance);
 #endif
-            private static void ChaFileSaveFilePreHook(ChaFile __instance) => CardWriteEvent(__instance);
 
+#if RG
+            private static void ChaFileSaveFileHook(ChaFile file, ref BlockHeader header, ref long[] array3)
+#else
             private static void ChaFileSaveFileHook(ChaFile file, BlockHeader header, ref long[] array3)
+#endif
             {
                 Dictionary<string, PluginData> extendedData = GetAllExtendedData(file);
                 if (extendedData == null)
@@ -232,17 +269,100 @@ namespace ExtensibleSaveFormat
 
 #if KK || KKS
             [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool))]
+            private static void ChaFileSaveFilePostHook(bool __result, BinaryWriter bw)
+#elif RG
+            [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(Il2CppSystem.IO.BinaryWriter), typeof(bool), typeof(int))]
+            private static void ChaFileSaveFilePostHook(ChaFile __instance, bool __result, Il2CppSystem.IO.BinaryWriter bw)
 #else
             [HarmonyPostfix, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool), typeof(int))]
-#endif
             private static void ChaFileSaveFilePostHook(bool __result, BinaryWriter bw)
+#endif
             {
+#if RG
+                if (!__result)
+                    return;
+
+                // set the binary writer to the begging of the block header, we are going to re-write all of
+                // the block data since we cant insert the header into the middle of the stream through a transpiler
+                bw.OutStream.Position = __instance.PngData.Length + 107 + __instance.FacePngData.Length;
+
+                byte[] customBytes = __instance.GetCustomBytes();
+                byte[] coordinateBytes = __instance.GetCoordinateBytes();
+                byte[] parameterBytes = __instance.GetParameterBytes();
+                byte[] gameInfoBytes = __instance.GetGameInfoBytes();
+                byte[] statusBytes = __instance.GetStatusBytes();
+                const int blockCount = 5;
+                string[] blockNames = new string[]
+                {
+                    ChaFileCustom.BlockName,
+                    ChaFileCoordinate.BlockName,
+                    ChaFileParameter.BlockName,
+                    ChaFileGameInfo.BlockName,
+                    ChaFileStatus.BlockName,
+                };
+                string[] blockVersions = new string[]
+                {
+                    ChaFileDefine.ChaFileCustomVersion.ToString(),
+                    ChaFileDefine.ChaFileCoordinateVersion.ToString(),
+                    ChaFileDefine.ChaFileParameterVersion.ToString(),
+                    ChaFileDefine.ChaFileGameInfoVersion.ToString(),
+                    ChaFileDefine.ChaFileStatusVersion.ToString(),
+                };
+                long[] blockSizes = new long[blockCount];
+                blockSizes[0] = (long)((customBytes == null) ? 0 : customBytes.Length);
+                blockSizes[1] = (long)((coordinateBytes == null) ? 0 : coordinateBytes.Length);
+                blockSizes[2] = (long)((parameterBytes == null) ? 0 : parameterBytes.Length);
+                blockSizes[3] = (long)((gameInfoBytes == null) ? 0 : gameInfoBytes.Length);
+                blockSizes[4] = (long)((statusBytes == null) ? 0 : statusBytes.Length);
+                long[] blockPositions = new long[]
+                {
+                    0,
+                    blockSizes[0],
+                    blockSizes[0] + blockSizes[1],
+                    blockSizes[0] + blockSizes[1] + blockSizes[2],
+                    blockSizes[0] + blockSizes[1] + blockSizes[2] + blockSizes[3]
+                };
+                BlockHeader blockHeader = new BlockHeader();
+
+                for (int block = 0; block < blockCount; block++)
+                {
+                    BlockHeader.Info item = new BlockHeader.Info
+                    {
+                        name = blockNames[block],
+                        version = blockVersions[block],
+                        size = blockSizes[block],
+                        pos = blockPositions[block]
+                    };
+
+                    blockHeader.lstInfo.Add(item);
+                }
+
+                ChaFileSaveFileHook(__instance, ref blockHeader, ref blockSizes);
+
+                var blockData = MessagePackSerializer.Serialize<BlockHeader>(blockHeader, null, Il2CppSystem.Threading.CancellationToken.None);
+
+                bw.Write(blockData.Length);
+                bw.Write(blockData);
+                long totalBlockSize = 0L;
+                foreach (long blockSize in blockSizes)
+                {
+                    totalBlockSize += blockSize;
+                }
+                bw.Write(totalBlockSize);
+                bw.Write(customBytes);
+                bw.Write(coordinateBytes);
+                bw.Write(parameterBytes);
+                bw.Write(gameInfoBytes);
+                bw.Write(statusBytes);
+
+#endif
                 if (!__result || currentlySavingData == null)
                     return;
 
                 bw.Write(currentlySavingData);
             }
 
+#if !RG
 #if KK || KKS
             [HarmonyTranspiler, HarmonyPatch(typeof(ChaFile), nameof(ChaFile.SaveFile), typeof(BinaryWriter), typeof(bool))]
 #else
@@ -283,7 +403,7 @@ namespace ExtensibleSaveFormat
 
                 return newInstructionSet;
             }
-
+#endif
             #endregion
 
             #endregion
@@ -292,6 +412,7 @@ namespace ExtensibleSaveFormat
 
             #region Loading
 
+#if !RG
 #if KK || KKS
             [HarmonyTranspiler, HarmonyPatch(typeof(ChaFileCoordinate), nameof(ChaFileCoordinate.LoadFile), typeof(Stream))]
 #else
@@ -320,8 +441,59 @@ namespace ExtensibleSaveFormat
                 }
                 if (!set) throw new InvalidOperationException("Didn't find any matches");
             }
+#endif
 
+#if RG
+            [HarmonyPostfix, HarmonyPatch(typeof(ChaFileCoordinate), nameof(ChaFileCoordinate.LoadFile), typeof(Il2CppSystem.IO.Stream), typeof(int), typeof(bool), typeof(bool), typeof(bool), typeof(bool))]
+            private static void ChaFileCoordinateLoadPostHook(ChaFileCoordinate __instance, bool __result, Il2CppSystem.IO.Stream st, int lang, bool clothes, bool accessory, bool hair, bool skipPng)
+            {
+                if (!__result)
+                    return;
+
+                if (st == null)
+                    return;
+
+                if (!st.CanRead)
+                    return;
+
+                Il2CppSystem.IO.BinaryReader binaryReader = new Il2CppSystem.IO.BinaryReader(st);
+                try
+                {
+                    Illusion.IO.PngFile.SkipPng(binaryReader);
+                    if (binaryReader.BaseStream.Length - binaryReader.BaseStream.Position == 0L)
+                        return;
+
+                    var loadProductNo = binaryReader.ReadInt32();
+                    if (loadProductNo > 100)
+                        return;
+
+                    var productString = binaryReader.ReadString();
+                    if (productString != "【RG_Clothes】")
+                        return;
+
+                    var loadVersion = new Il2CppSystem.Version(binaryReader.ReadString());
+                    if (loadVersion > ChaFileDefine.ChaFileClothesVersion)
+                        return;
+
+                    var language = binaryReader.ReadInt32();
+                    var coordinateName = binaryReader.ReadString();
+                    int count = binaryReader.ReadInt32();
+                    byte[] data = binaryReader.ReadBytes(count);
+
+                    ChaFileCoordinateLoadHook(__instance, binaryReader);
+                }
+                catch (EndOfStreamException)
+                {
+                    return;
+                }
+            }
+#endif
+
+#if RG
+            private static void ChaFileCoordinateLoadHook(ChaFileCoordinate coordinate, Il2CppSystem.IO.BinaryReader br)
+#else
             private static void ChaFileCoordinateLoadHook(ChaFileCoordinate coordinate, BinaryReader br)
+#endif
             {
                 try
                 {
@@ -334,14 +506,18 @@ namespace ExtensibleSaveFormat
                     {
                         if (!LoadEventsEnabled)
                         {
-                            br.BaseStream.Seek(length, SeekOrigin.Current);
+                            br.BaseStream.Seek(length, Il2CppSystem.IO.SeekOrigin.Current);
                             internalCoordinateDictionary.Set(coordinate, new Dictionary<string, PluginData>());
                         }
                         else
                         {
                             byte[] bytes = br.ReadBytes(length);
+#if RG
+                            Il2CppSystem.Buffers.ReadOnlySequence<byte> buffer = new Il2CppSystem.Buffers.ReadOnlySequence<byte>((IntPtr)bytes[0]);
+                            var dictionary = MessagePackSerializer.Deserialize<Dictionary<string, PluginData>>(ref buffer);
+#else
                             var dictionary = MessagePackSerializer.Deserialize<Dictionary<string, PluginData>>(bytes);
-
+#endif
                             internalCoordinateDictionary.Set(coordinate, dictionary);
                         }
                     }
@@ -368,6 +544,7 @@ namespace ExtensibleSaveFormat
 
             #region Saving
 
+#if !RG
 #if KK || KKS
             [HarmonyTranspiler, HarmonyPatch(typeof(ChaFileCoordinate), nameof(ChaFileCoordinate.SaveFile), typeof(string))]
 #else
@@ -393,8 +570,44 @@ namespace ExtensibleSaveFormat
                 }
                 if (!hooked) throw new InvalidOperationException("Didn't find any matches");
             }
+#endif
+#if RG
+            [HarmonyPrefix, HarmonyPatch(typeof(ChaFileCoordinate), nameof(ChaFileCoordinate.SaveFile), typeof(string), typeof(int))]
+            private static bool ChaFileCoordinateSavePreHook(ChaFileCoordinate __instance, string path, int lang)
+            {
+                var directoryName = Path.GetDirectoryName(path);
+                if (!Directory.Exists(directoryName))
+                {
+                    Directory.CreateDirectory(directoryName);
+                }
+                __instance.coordinateFileName = Path.GetFileName(path);
 
+                Il2CppSystem.IO.FileStream fileStream = new Il2CppSystem.IO.FileStream(path, Il2CppSystem.IO.FileMode.Create, Il2CppSystem.IO.FileAccess.Write);
+                Il2CppSystem.IO.BinaryWriter binaryWriter = new Il2CppSystem.IO.BinaryWriter(fileStream);
+
+                if (__instance.pngData != null)
+                {
+                    binaryWriter.Write(__instance.pngData);
+                }
+                binaryWriter.Write(100);
+                binaryWriter.Write("【RG_Clothes】");
+                binaryWriter.Write(ChaFileDefine.ChaFileClothesVersion.ToString());
+                binaryWriter.Write(lang);
+                binaryWriter.Write(__instance.coordinateName);
+                byte[] array = __instance.SaveBytes();
+                binaryWriter.Write(array.Length);
+                binaryWriter.Write(array);
+
+                ChaFileCoordinateSaveHook(__instance, binaryWriter);           
+
+                return false;
+            }
+#endif
+#if RG
+            private static void ChaFileCoordinateSaveHook(ChaFileCoordinate file, Il2CppSystem.IO.BinaryWriter bw)
+#else
             private static void ChaFileCoordinateSaveHook(ChaFileCoordinate file, BinaryWriter bw)
+#endif
             {
                 CoordinateWriteEvent(file);
 

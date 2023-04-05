@@ -181,6 +181,55 @@ namespace ExtensibleSaveFormat
             PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
 #endif
 
+#if RG
+            //Body
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileBody");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+
+            //Face
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileFace");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileFace/EyesInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileFace/MakeupInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+
+            //Hair
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileHair");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileHair/PartsInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileHair/PartsInfo/BundleInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileHair/PartsInfo/ColorInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+
+            //Clothes
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileClothes");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileClothes/PartsInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileClothes/PartsInfo/ColorInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+
+            //Accessory
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileAccessory");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileAccessory/PartsInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileAccessory/PartsInfo/ColorInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileGameInfo");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileParameter");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+
+            messagePackObject = ass.MainModule.GetType("Chara.ChaFileStatus");
+            PropertyInject(ass, messagePackObject, ExtendedSave.ExtendedSaveDataPropertyName, typeof(object));
+#endif
+
         }
 
         public static void PropertyInject(AssemblyDefinition assembly, TypeDefinition assemblyTypes, string propertyName, Type returnType)

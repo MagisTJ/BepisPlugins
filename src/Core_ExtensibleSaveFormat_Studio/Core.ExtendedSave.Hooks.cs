@@ -46,7 +46,11 @@ namespace ExtensibleSaveFormat
                     throw new Exception("Failed to patch SceneInfo.Load");
             }
 
+#if RG
+            public static void SceneInfoLoadHook(string path, Il2cppSystem.IO.BinaryReader br)
+#else
             public static void SceneInfoLoadHook(string path, BinaryReader br)
+#endif
             {
                 internalSceneDictionary.Clear();
 
@@ -101,7 +105,11 @@ namespace ExtensibleSaveFormat
                     throw new Exception("Failed to patch SceneInfo.Import");
             }
 
+#if RG
+            public static void SceneInfoImportHook(string path, Il2CppSystem.IO.BinaryReader br, Version _)
+#else
             public static void SceneInfoImportHook(string path, BinaryReader br, Version _)
+#endif
             {
                 internalSceneDictionary.Clear();
 
@@ -166,7 +174,11 @@ namespace ExtensibleSaveFormat
                     throw new Exception("Failed to patch SceneInfo.Save");
             }
 
+#if RG
+            public static void SceneInfoSaveHook(string path, Il2CppSystem.IO.BinaryWriter bw)
+#else
             public static void SceneInfoSaveHook(string path, BinaryWriter bw)
+#endif
             {
                 SceneWriteEvent(path);
 
@@ -208,12 +220,20 @@ namespace ExtensibleSaveFormat
             }
 
             [HarmonyPostfix, HarmonyPatch(typeof(PauseCtrl.FileInfo), nameof(PauseCtrl.FileInfo.Load))]
+#if RG
+            private static void PauseCtrl_FileInfo_Load(Il2CppSystem.IO.BinaryReader _reader, PauseCtrl.FileInfo __instance)
+#else
             private static void PauseCtrl_FileInfo_Load(BinaryReader _reader, PauseCtrl.FileInfo __instance)
+#endif
             {
                 PoseLoadHook(_reader, __instance);
             }
 
+#if RG
+            private static void PoseLoadHook(Il2CppSystem.IO.BinaryReader br, PauseCtrl.FileInfo fileInfo)
+#else
             private static void PoseLoadHook(BinaryReader br, PauseCtrl.FileInfo fileInfo)
+#endif
             {
                 internalPoseDictionary.Clear();
 
@@ -255,12 +275,20 @@ namespace ExtensibleSaveFormat
             }
 
             [HarmonyPostfix, HarmonyPatch(typeof(PauseCtrl.FileInfo), nameof(PauseCtrl.FileInfo.Save))]
+#if RG
+            private static void PauseCtrl_FileInfo_Save(Il2CppSystem.IO.BinaryWriter _writer, PauseCtrl.FileInfo __instance)
+#else
             private static void PauseCtrl_FileInfo_Save(BinaryWriter _writer, PauseCtrl.FileInfo __instance)
+#endif
             {
                 PoseSaveHook(_writer, __instance);
             }
 
+#if RG
+            private static void PoseSaveHook(Il2CppSystem.IO.BinaryWriter bw, PauseCtrl.FileInfo fileInfo)
+#else
             private static void PoseSaveHook(BinaryWriter bw, PauseCtrl.FileInfo fileInfo)
+#endif
             {
                 PoseWriteEvent(PoseName, fileInfo, PoseChar, GameName);
 

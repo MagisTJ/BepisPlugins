@@ -7,6 +7,10 @@ using System.Collections.Generic;
 #if AI || HS2
 using AIChara;
 #endif
+#if RG
+using UnhollowerRuntimeLib;
+using Chara;
+#endif
 
 namespace ExtensibleSaveFormat
 {
@@ -41,7 +45,12 @@ namespace ExtensibleSaveFormat
 
         internal void Awake()
         {
+#if RG
+            Logger = base.Log;
+#else
             Logger = base.Logger;
+#endif
+
             Hooks.InstallHooks();
         }
 
@@ -128,7 +137,34 @@ namespace ExtensibleSaveFormat
 
             chaDictionary[id] = extendedFormatData;
         }
+#if RG
+        internal static void MessagePackSerialize<T>(MessagePackWriter writer, T obj)
+        {
+            try
+            {
+                MessagePackSerializer.Serialize(Il2CppType.Of<T>(), ref writer, (Il2CppSystem.Object)(obj as Object), MessagePackSerializerOptions.Standard);
+                return;
+            }
+            catch (System.InvalidOperationException)
+            {
+                Logger.LogWarning("Only primitive types are supported. Serialize your data first.");
+                throw;
+            }
+        }
 
+        internal static T MessagePackDeserialize<T>(Il2CppSystem.Buffers.ReadOnlySequence<byte> obj)
+        {
+            try
+            {
+                return MessagePackSerializer.Deserialize<T>(ref obj, MessagePackSerializerOptions.Standard);
+            }
+            catch (System.InvalidOperationException)
+            {
+                Logger.LogWarning("Only primitive types are supported. Serialize your data first.");
+                throw;
+            }
+        }
+#else
         internal static byte[] MessagePackSerialize<T>(T obj)
         {
             try
@@ -162,5 +198,6 @@ namespace ExtensibleSaveFormat
                 throw;
             }
         }
+#endif
     }
 }

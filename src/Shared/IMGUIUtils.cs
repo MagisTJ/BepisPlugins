@@ -125,7 +125,11 @@ namespace Shared
 
         public static bool DrawButtonWithShadow(Rect r, GUIContent content, GUIStyle style, float shadowAlpha, Vector2 direction)
         {
+#if RG
+            GUIStyle letters = new GUIStyle(style.m_Ptr);
+#else
             GUIStyle letters = new GUIStyle(style);
+#endif
             letters.normal.background = null;
             letters.hover.background = null;
             letters.active.background = null;

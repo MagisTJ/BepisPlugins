@@ -42,6 +42,10 @@ namespace BepisPlugins
         internal const string GameProcessName = "KoikatsuSunshine";
         internal const string StudioProcessName = "CharaStudio";
         internal const string VRProcessName = "KoikatsuSunshine_VR";
+#elif RG
+        internal static bool InsideStudio => Application.productName == StudioProcessName;
+        internal const string StudioProcessName = "RoomStudio";
+        internal const string GameProcessName = "RoomGirl";
 #endif
     }
 }
